@@ -1,0 +1,162 @@
+﻿@page "/"
+@using Microsoft.AspNetCore.SignalR.Client
+
+@inject IJSRuntime Js
+@inject NavigationManager Nav;
+<PageTitle>Dirty WebRtc Demo</PageTitle>
+
+<h1>Hello, world!</h1>
+<a href="rtc">RTC</a>
+<div class="container">
+    <video class="col-6" id="localVideo" autoplay playsinline></video>
+    <video class="col-6" id="remoteVideo" autoplay playsinline></video>
+</div>
+
+<div>
+    <button @onclick="StartAction" id="startButton">Start</button>
+    <button @onclick="CallAction" id="callButton">Call</button>
+    <button @onclick="HangupAction" id="hangupButton">Hang Up</button>
+    @if (_hubConnection == null)
+    {
+        <button @onclick="StartHub" id="start">Start Messaging</button>
+    }
+    else
+    {
+        <button @onclick="Test" id="test">Test</button>
+    }
+</div>
+<div>
+    @foreach (var message in _messages)
+    {
+        <p>@message</p>
+    }
+</div>
+
+@code {
+    private HubConnection? _hubConnection;
+    private IJSObjectReference? _module;
+    private readonly List<string> _messages = new();
+    private DotNetObjectReference<Index>? _dotNetHelper;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _module = await Js.InvokeAsync<IJSObjectReference>(
+                "import", "./Pages/Index.razor.js");
+        }
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    [JSInvokable]
+    public async Task SetOffer(string offer)
+    {
+        var hub = await GetHub();
+        await hub.SendAsync("join", "myGroup");
+        await hub.SendAsync("Offer", "myGroup", offer);
+        // In events triggered by UI and lifecycle, stateHasChanged is automatic. Since this is called from Js, we are explicit.
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public async Task SetAnswer(string answer)
+    {
+        var hub = await GetHub();
+        await hub.SendAsync("join", "myGroup");
+        await hub.SendAsync("Answer", "myGroup", answer);
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public async Task SetCandidate(string candidate)
+    {
+        var hub = await GetHub();
+        await hub.SendAsync("join", "myGroup");
+        await hub.SendAsync("Candidate", "myGroup", candidate);
+        StateHasChanged();
+    }
+
+    private async Task<HubConnection> GetHub()
+    {
+        if (_hubConnection != null) return _hubConnection;
+
+        var hubConnection = new HubConnectionBuilder()
+            .WithUrl(Nav.ToAbsoluteUri("/messagehub"))
+            .Build();
+
+        hubConnection.On<string, string>("ReceiveMessage", (message, _) =>
+        {
+            _messages.Add(message);
+            StateHasChanged();
+        });
+        hubConnection.On<string>("ReceiveOffer", async (offer) =>
+        {
+            await ProcessOffer(offer);
+            StateHasChanged();
+        });
+
+        hubConnection.On<string>("ReceiveAnswer", async (answer) =>
+        {
+            await ProcessAnswer(answer);
+            StateHasChanged();
+        });
+
+        hubConnection.On<string>("ReceiveCandidate", async (candidate) =>
+        {
+            await ProcessCandidate(candidate);
+            StateHasChanged();
+        });
+
+        await hubConnection.StartAsync();
+        _hubConnection = hubConnection;
+        return _hubConnection;
+    }
+
+    private async Task ProcessOffer(string offer)
+    {
+        if (_module == null) throw new InvalidOperationException();
+        await _module.InvokeVoidAsync("processOffer", offer);
+    }
+
+    private async Task ProcessAnswer(string answer)
+    {
+        if (_module == null) throw new InvalidOperationException();
+        await _module.InvokeVoidAsync("processAnswer", answer);
+    }
+    private async Task ProcessCandidate(string candidate)
+    {
+        if (_module == null) throw new InvalidOperationException();
+        await _module.InvokeVoidAsync("processCandidate", candidate);
+    }
+
+    private async Task Test()
+    {
+        var hub = await GetHub();
+        await hub.SendAsync("sendMessage", "myGroup", "hello", false);
+    }
+
+    private async Task StartHub()
+    {
+        var hub = await GetHub();
+        await hub.SendAsync("join", "myGroup");
+    }
+
+    private async Task StartAction()
+    {
+        if (_module == null) throw new InvalidOperationException();
+        await StartHub();
+        _dotNetHelper = DotNetObjectReference.Create(this);
+        await _module.InvokeVoidAsync("startAction", _dotNetHelper);
+    }
+    private async Task CallAction()
+    {
+        if (_module == null) throw new InvalidOperationException();
+        await _module.InvokeVoidAsync("callAction");
+    }
+    private async Task HangupAction()
+    {
+        if (_module == null) throw new InvalidOperationException();
+        await _module.InvokeVoidAsync("hangupAction");
+    }
+
+}

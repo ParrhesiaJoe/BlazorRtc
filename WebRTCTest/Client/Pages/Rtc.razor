@@ -1,0 +1,84 @@
+﻿@page "/rtc"
+@layout BlankLayout
+@using BlazorRtc.Client.Shared
+@using BlazorRtc.Client.WebRtc
+@inject WebRtcService RtcService;
+@inject IJSRuntime Js
+<PageTitle>WebRtc</PageTitle>
+
+<div class="py-4">
+    <label for="channelInput">Channel</label>
+    <input id="channelInput" @bind="_channel"/>
+    <button id="startButton" @onclick="StartAction" disabled="@_startDisabled">Start</button>
+    <button id="callButton" @onclick="CallAction" disabled="@_callDisabled">Call</button>
+    <button id="hangupButton" @onclick="HangupAction" disabled="@_hangupDisabled">Hang Up</button>
+</div>
+
+<div class="container">
+    <div class="row">
+        <video class="col col-lg-6 p-0" id="localVideo" autoplay playsinline></video>
+        <video class="col col-lg-6 p-0" id="remoteVideo" autoplay playsinline></video>
+    </div>
+</div>
+
+
+@code {
+    private IJSObjectReference? _module;
+    private bool _startDisabled;
+    private bool _callDisabled = true;
+    private bool _hangupDisabled = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+    }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _module = await Js.InvokeAsync<IJSObjectReference>(
+                "import", "./Pages/Rtc.razor.js");
+        }
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    private async Task StartAction()
+    {
+        if (string.IsNullOrWhiteSpace(_channel)) return;
+        if (_module == null) throw new InvalidOperationException();
+        if (_startDisabled) return;
+        _startDisabled = true;
+        await RtcService.Join(_channel);
+        var stream = await RtcService.StartLocalStream();
+        await _module.InvokeVoidAsync("setLocalStream", stream);
+        RtcService.OnRemoteStreamAcquired += RtcOnOnRemoteStreamAcquired;
+        _callDisabled = false;
+    }
+
+    private async void RtcOnOnRemoteStreamAcquired(object? _, IJSObjectReference e)
+    {
+        if (_module == null) throw new InvalidOperationException();
+        await _module.InvokeVoidAsync("setRemoteStream", e);
+        _callDisabled = true;
+        _hangupDisabled = false;
+        _startDisabled = true;
+        StateHasChanged();
+    }
+
+    private async Task CallAction()
+    {
+        if (_callDisabled) return;
+        _callDisabled = true;
+        await RtcService.Call();
+        _hangupDisabled = false;
+    }
+    private async Task HangupAction()
+    {
+        await RtcService.Hangup();
+        _callDisabled = true;
+        _hangupDisabled = true;
+        _startDisabled = false;
+    }
+
+    private string _channel = "foo";
+}
